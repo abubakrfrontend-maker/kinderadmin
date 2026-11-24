@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ============================
+    // Helper functions
+    // ============================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getUserKindergartenId() {
+      return getUserData().kindergartenId;
+    }
+
+    function getUserRole() {
+      return getUserData().role;
+    }
+
+    function belongsToKindergarten(kgId) {
+      return isAuthenticated() && getUserKindergartenId() == kgId;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserRole() == 'superadmin';
+    }
+
+    function isKgAdmin(kgId) {
+      return belongsToKindergarten(kgId) && getUserRole() == 'admin';
+    }
+
+    function hasKgRole(kgId, roles) {
+      return belongsToKindergarten(kgId) && getUserRole() in roles;
+    }
+
+    // ============================
+    // Users collection (root level)
+    // ============================
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    // ============================
+    // Kindergartens
+    // ============================
+    match /kindergartens/{kindergartenId} {
+      // Kindergarten document itself
+      allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+
+      // Children
+      match /children/{childId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if hasKgRole(kindergartenId, ['admin', 'teacher']) || isSuperAdmin();
+      }
+
+      // Employees
+      match /employees/{employeeId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+
+      // Transactions (finances)
+      match /transactions/{transactionId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if hasKgRole(kindergartenId, ['admin', 'accountant']) || isSuperAdmin();
+      }
+
+      // Attendance
+      match /attendance/{attendanceId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if hasKgRole(kindergartenId, ['admin', 'teacher']) || isSuperAdmin();
+      }
+
+      // Groups
+      match /groups/{groupId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+
+      // Departments
+      match /departments/{departmentId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+
+      // Attendance Days (meta: closed/open status)
+      match /attendanceDays/{docId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if hasKgRole(kindergartenId, ['admin', 'teacher']) || isSuperAdmin();
+      }
+
+      // Employee Attendance
+      match /employeeAttendance/{docId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+
+      // Employee Attendance Days (meta)
+      match /employeeAttendanceDays/{docId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+
+      // Archive (soft-deleted children/employees)
+      match /archive/{docId} {
+        allow read: if belongsToKindergarten(kindergartenId) || isSuperAdmin();
+        allow write: if isKgAdmin(kindergartenId) || isSuperAdmin();
+      }
+    }
+
+    // ============================
+    // Migration status (root level)
+    // ============================
+    match /migration/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+  }
+}
